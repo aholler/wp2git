@@ -1,0 +1,7 @@
+wp2git
+version.h
+CMakeCache.txt
+CMakeFiles
+Makefile
+cmake_install.cmake
+*.swp

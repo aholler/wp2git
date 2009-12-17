@@ -1,0 +1,76 @@
+
+Small description of wp2git
+
+This project is currently more or less a c++-clone of import.py from Levitation.
+It imports pages from wikimedia-export-files into a git repository.
+
+Have a look at their page at http://levit.at/ion/ for any description of
+what this thing is for.
+
+I've written it as an inaccurate speed comparison c++ vs. python.
+Nothing to blame, I just have had some spare time and was curious.
+Another reason is that I'm believing script languages are not the right tool
+for everything (and I like C++) and it seemed this could be a small proof
+for that.
+
+Credits are going to the Levitation developers. They have developed the way
+how to import the pages into git, I just have rewritten their python script
+in C++.
+
+As a note, I'm not really interested in the topic Wikipedia, so I don't know
+if I will maintain this program as much as others would like it. This means the
+levitation project will most likely a much better contact if you are interested
+in the topic of importing wikimedia stuff into git.
+
+
+To compile it you need cmake.
+
+Build the release-version:
+cmake -DCMAKE_BUILD_TYPE=release
+make
+
+Build the debug-version:
+cmake -DCMAKE_BUILD_TYPE=debug
+make
+
+To get a verbose output during compilation, use
+VERBOSE=1 make
+
+Run make edit_cache to modify some varibles.
+
+To compile it you will need some boost-dev-packages.
+
+For Debian 5.0 (Lenny) the runtime dependencies are
+
+libboost-date-time1.35.0
+libboost-iostreams1.35.0
+libboost-program-options1.35.0
+
+and maybe some more or less boost libraries. I don't keep
+this list recent.
+
+To build a binary without any dependencies on boost libraries,
+change the line
+
+SET(Boost_USE_STATIC_LIBS OFF)
+
+in CMakeLists.txt to
+
+SET(Boost_USE_STATIC_LIBS ON)
+
+The binary will be somewhat larger, but should be easier to distribute.
+
+You will need at least gcc 3.x, if you don't use gcc 4.x, you have
+to remove -std=gnu++0x from the compiler-flags in CMakeLists.txt.
+
+If you really want to compile it with a gcc below 3.x you have to replace
+the unordered_map with something like
+
+size_t operator()(std::string const &str) const {
+    return __gnu_cxx::hash<char const *>()(str.c_str());
+}
+typedef __gnu_cxx::hash_map<std::string, Element> MapKeyString;
+
+That will not work, but should show you the direction what to use as a
+replacement for the unordered_map. And there might be some other stuff
+you have to change to compile it using a gcc < 3.x.
