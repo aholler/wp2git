@@ -1,15 +1,18 @@
 // (c) 2009 Alexander Holler
 // See the file COPYING for copying permission.
 //
-// No funny objects created, this is a very small and dump programm
-// and we are just using globals.
-//
 // I'm believing in KISS (keep it stupid, simple).
-
-#include <fstream>
+//
+// Just as a note, we assume the XML is sorted in some ways,
+// i.e. the id and title of a page is defined before any revision.
+// This keeps the parser simple.
+//
+#include <malloc.h> // mallinfo()
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <stack>
+#include <map>
 #include <tr1/unordered_map> // You will need a gcc >= 3.x
 
 #include <boost/iostreams/filtering_streambuf.hpp>
@@ -19,6 +22,8 @@
 #include <boost/program_options/parsers.hpp>
 #include <boost/program_options/variables_map.hpp>
 #include <boost/program_options/options_description.hpp>
+#include <boost/date_time/posix_time/posix_time.hpp>
+#include <boost/date_time/gregorian/gregorian.hpp>
 
 #include <expat.h>
 
@@ -28,30 +33,38 @@
 
 // Stuff we are reading and feeding to git.
 static std::string comment;
-static std::string id;
 static std::string ip;
 static std::string text;
 static std::string timestamp;
 static std::string title;
+static std::string title_ns;
 static std::string username;
+static bool is_minor(false);
+static bool is_del(false); // TODO: is currently never set.
+static unsigned long id_contributor;
+static unsigned long id_page;
+static unsigned long id_revision;
 
 // Options.
 static std::string filename;
+static std::string tempfilename;
 static std::string committer("wp2git <wp2git@localhost.localdomain>");
 static unsigned deepness(3);
 static bool wikitime(false);
+static size_t max_revisions(0);
 static std::string programname;
 
-// Miscellaneous
-unsigned long pagecount(0);
-unsigned long revisioncount(0);
+// The actual code starts here.
+
+static std::fstream tfile;
+static size_t revisions_read(0);
 
 enum Element {
     Element_unknown,
     Element_comment,
     Element_id,
     Element_ip,
-    Element_restrictions,
+    Element_minor,
     Element_revision,
     Element_text,
     Element_timestamp,
@@ -61,20 +74,14 @@ enum Element {
 /*
     Element_contributor,
     Element_mediawiki,
-    Element_minor,
     Element_namespace,
     Element_page,
+    Element_restrictions,
 */
 };
 
 typedef std::tr1::unordered_map<std::string, Element> MapElementsKeyString;
 static MapElementsKeyString mapElementNames;
-
-static std::stack<Element> elementStack;
-
-static std::string actualValue;
-
-// The actual code starts here.
 
 static void initMap(void)
 {
@@ -82,7 +89,7 @@ static void initMap(void)
     mapElementNames["comment"] = Element_comment;
     mapElementNames["id"] = Element_id;
     mapElementNames["ip"] = Element_ip;
-    mapElementNames["restrictions"] = Element_restrictions;
+    mapElementNames["minor"] = Element_minor;
     mapElementNames["revision"] = Element_revision;
     mapElementNames["text"] = Element_text;
     mapElementNames["timestamp"] = Element_timestamp;
@@ -92,11 +99,21 @@ static void initMap(void)
 /*
     mapElementNames["contributor"] = Element_contributor;
     mapElementNames["mediawiki"]=Element_mediawiki;
-    mapElementNames["minor"] = Element_minor;
     mapElementNames["namespace"] = Element_namespace;
     mapElementNames["page"] = Element_page;
+    mapElementNames["restrictions"] = Element_restrictions;
 */
 }
+
+static std::stack<Element> elementStack;
+
+typedef std::multimap<std::time_t, std::string> Revisions;
+static Revisions revisions;
+
+typedef std::multimap<std::time_t, std::streampos> RevisionPositions;
+static RevisionPositions revisionPositions;
+
+static std::string actualValue;
 
 static void printHelp(const std::string& myName,
     const boost::program_options::options_description& desc)
@@ -111,6 +128,8 @@ static void printHelp(const std::string& myName,
     std::cerr << std::endl;
     std::cerr << myName
         << " barwiki-20091206-pages-articles.xml.bz2 | GIT_DIR=repo git fast-import" << std::endl;
+    std::cerr << "7z e -bd -so dewiki-20091028-pages-meta-history.xml.7z | "
+        << myName << " -t mytempfile | GIT_DIR=repo git fast-import" << std::endl;
     std::cerr << myName
         << " -c \"Foo Bar <foo@bar.local>\" -d 10 -w barwiki-20091206-pages-articles.xml.bz2 | GIT_DIR=repo git fast-import" << std::endl;
     std::cerr << myName
@@ -137,8 +156,12 @@ int config(int argc, char** argv)
             std::string("git \"Committer\" used while doing the commits (default \"" + committer + "\")").c_str())
         ("deepness,d", boost::program_options::value<unsigned>(&deepness),
             "The deepness of the result directory structure (default 3)")
+        ("max,m", boost::program_options::value<size_t>(&max_revisions),
+            "Maximum number of revisions (not pages!) to import (default 0 = all)")
+        ("tempfile,t", boost::program_options::value<std::string>(&tempfilename),
+            "Use this temporary file to minimize RAM-usage")
         ("wikitime,w", boost::program_options::bool_switch(&wikitime),
-            "If true, the commit time will be set to the revision creation, not the current system time (default false)")
+            "TODO: If true, the commit time will be set to the revision creation, not the current system time (default false)")
         ("mediawiki-export-bz2", boost::program_options::value< std::vector<std::string> >(), "file to read")
         ;
         boost::program_options::positional_options_description podesc;
@@ -157,23 +180,168 @@ int config(int argc, char** argv)
         printHelp(programname, desc);
         return 1;
     }
-    if( vm.count("mediawiki-export-bz2") != 1 ) {
-         printHelp(programname, desc);
+    if( vm.count("mediawiki-export-bz2") > 1 ) {
+        printHelp(programname, desc);
         return 3;
     }
-    filename = vm["mediawiki-export-bz2"].as< std::vector<std::string> >()[0];
+    else if(vm.count("mediawiki-export-bz2") == 1 )
+        filename = vm["mediawiki-export-bz2"].as< std::vector<std::string> >()[0];
+    if( ! max_revisions )
+        max_revisions = (unsigned long)-1;
     return 0;
+}
+
+inline std::string asciiize_char(char c)
+{
+    static const std::string allowedChars(
+        //"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789()-_"
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+    );
+    if( allowedChars.find(c) != std::string::npos )
+        return std::string(1, c);
+    std::string s(".");
+    static const std::string hexChars("0123456789ABCDEF");
+    s += hexChars[(c>>4) & 0x0f];
+    s += hexChars[c & 0x0f];
+    return s;
+}
+
+static std::string asciiize(const std::string& str)
+{
+    std::string s;
+    size_t end = str.size();
+    for(size_t i=0; i<end; ++i)
+        s += asciiize_char(str[i]);
+    return s;
+}
+
+static std::string buildCommitString(std::time_t date)
+{
+    std::string str("author ");
+    if( ! username.empty() ) {
+        str += username;
+        str += " <uid-" + boost::lexical_cast<std::string>(id_contributor);
+    }
+    else {
+        str += ip;
+        str += " <ip";
+    }
+    str += "@git.bar.wikipedia.org> ";
+    str += boost::lexical_cast<std::string>(date);
+    // TODO: Fix timezone (using boost::local_time).
+    str += " +0000\n";
+    str += "committer " + committer + ' ';
+    // TODO: Fix timezone (using boost::local_time).
+    str += boost::lexical_cast<std::string>(time(NULL))+ " +0100\n";
+    std::string commit_comment("\n\nwp2git import of"
+        " page " + boost::lexical_cast<std::string>(id_page) +
+        + " rev " + boost::lexical_cast<std::string>(id_revision)
+        + (is_minor ? " (minor)" : "")
+        + ".\n");
+    str += "data " + boost::lexical_cast<std::string>(comment.size()+commit_comment.size()) + '\n';
+    str += comment + commit_comment + '\n';
+
+    // Build the filename
+    unsigned flags(0);
+    if(is_minor)
+        ++flags;
+    if( username.empty() )
+        flags += 2;
+    if(is_del)
+        flags += 4;
+    std::string tfilename(boost::lexical_cast<std::string>(flags));
+    // TODO: import.py does something other here (e.g. 10-)
+    tfilename += "-" + title_ns + '/';
+    for( unsigned i = 0; i<deepness && i<title.size(); ++i ) {
+        tfilename += asciiize_char(title[i]);
+        tfilename += '/';
+    }
+    tfilename += asciiize(title);
+    tfilename += ".mediawiki";
+
+    str += "M 100644 :" + boost::lexical_cast<std::string>(id_revision)
+        + ' ' + tfilename;
+    return str;
+}
+
+static std::streampos writeString(const std::string& str)
+{
+    std::streampos pos;
+    try {
+        pos = tfile.tellp();
+        size_t len = str.size();
+        tfile.write(reinterpret_cast<const char*>(&len), sizeof(len));
+        tfile.write(str.data(), str.size());
+    }
+    catch (std::exception& e) {
+        // e.what() offers only cryptic errors here
+        std::cerr << "ERROR: Can't write to file '" << tempfilename << "'!" << std::endl;
+        exit(3);
+    }
+    return pos;
+}
+
+static std::string readString(std::streampos pos)
+{
+   try {
+        tfile.seekp(pos);
+        size_t len;
+        tfile.read(reinterpret_cast<char*>(&len), sizeof(len));
+        if(!len)
+            return "";
+        std::vector<char> v(len);
+        tfile.read(&v[0], len);
+        return std::string(v.begin(), v.end());
+    }
+    catch (std::exception& e) {
+        // e.what() offers only cryptic errors here
+        std::cerr << "ERROR: Can't read from file '" << tempfilename << "'!" << std::endl;
+        exit(4);
+    }
+}
+
+static std::time_t time_t_from_timestamp(void)
+{
+    // We assume the following format for timestamps: 2009-12-01T12:09:31Z
+    assert( timestamp.size() == 20 );
+    timestamp[10]=' '; // Exchange T.
+    timestamp.erase(19); // Remove Z.
+    // time_t starts counting 1.1.1970.
+    static const boost::posix_time::ptime time_t_epoch(boost::gregorian::date(1970,1,1));
+    // Build the time_t, is just the difference
+    // between 1.1.1970 and the timestamp in seconds.
+    return static_cast<std::time_t>(
+        boost::posix_time::time_duration(
+            boost::posix_time::time_from_string(timestamp) - time_t_epoch
+        ).total_seconds());
+    // TODO: Fix date according timezone (using boost::local_time).
+}
+
+static void output_blob(void)
+{
+    std::cout << "blob\n";
+    // TODO: Currently I don't know why import.py uses + 1,
+    // that might be to avoid revisions with 0.
+    //std::cout << "mark :" << id_revision + 1 << '\n';
+    std::cout << "mark :" << id_revision << '\n';
+    std::cout << "data " << text.size() << '\n';
+    std::cout << text << '\n';
 }
 
 // Is called whenever a revision tag was closed.
 static void newRevision(void)
 {
-    std::cout << "blob\n";
-    unsigned idPlusOne(boost::lexical_cast<unsigned>(id)+1);
-    std::cout << "mark :" << idPlusOne << '\n';
-    std::cout << "data " << text.size() << '\n';
-    std::cout << text << '\n';
-    ++revisioncount;
+    output_blob();
+    std::time_t date = time_t_from_timestamp();
+    if( ! tempfilename.empty() ) {
+        std::streampos pos = writeString(buildCommitString(date));
+        revisionPositions.insert(
+            std::pair<std::time_t, std::streampos>(date, pos));
+    }
+    else
+        revisions.insert(
+            std::pair<std::time_t, std::string>(date, buildCommitString(date)));
+    ++revisions_read;
 }
 
 // Callbacks for expat
@@ -187,11 +355,12 @@ static void XMLCALL startElement(void *, const char *name, const char **)
         elementStack.push(ei->second);
         if( elementStack.size() == 3 && ei->second == Element_revision ) {
             comment.clear();
-            id.clear();
             ip.clear();
             text.clear();
             timestamp.clear();
             username.clear();
+            is_minor = false;
+            is_del = false;
         }
     }
     else {
@@ -209,11 +378,19 @@ static void XMLCALL endElement(void *, const char *name)
             break;
         case Element_id:
             if( elementStack.size() == 4 ) // below revision
-                id.swap(actualValue);
-            break;
+                id_revision = boost::lexical_cast<unsigned long>(actualValue);
+            else if( elementStack.size() == 5 ) // below contributor
+                id_contributor = boost::lexical_cast<unsigned long>(actualValue);
+            else if( elementStack.size() == 3 ) // below page
+                id_page = boost::lexical_cast<unsigned long>(actualValue);
+           break;
         case Element_ip:
-            if( elementStack.size() == 6 ) // below username
+            if( elementStack.size() == 5  || elementStack.size() == 6 ) // below contributor or below username
                 ip.swap(actualValue);
+            break;
+        case Element_minor:
+            if( elementStack.size() == 4 ) // below revision
+                is_minor = true;
             break;
         case Element_text:
             if( elementStack.size() == 4 ) // below revision
@@ -231,7 +408,15 @@ static void XMLCALL endElement(void *, const char *name)
             if( elementStack.size() == 3 ) { // below page
                 title.swap(actualValue);
                 std::cerr << "Processing page " << title << std::endl;
-                ++pagecount;
+                size_t colon = title.find(':');
+                if( colon != std::string::npos ) {
+                    title_ns = title.substr(0, colon);
+                    // TODO: We should check if this is a namespace
+                    // (which would require to read the namespaces).
+                    title.erase(0, colon+1);
+                }
+                else
+                    title_ns.clear();
             }
             break;
         case Element_username:
@@ -249,7 +434,32 @@ static void XMLCALL characterHandler(void *, const char *txt, int txtlen)
     actualValue += std::string(txt, txtlen);
 }
 
-// The small main
+static void printMemInfo(void)
+{
+    // See http://www.gnu.org/software/libc/manual/html_node/Statistics-of-Malloc.html
+    // and have a look at /usr/include/malloc.h.
+    struct mallinfo info = mallinfo();
+    // This is the total size of memory allocated with sbrk (not mmaped) by malloc
+    // plus size of memory allocated with mmap, both in bytes.
+    std::cerr << "Allocated 1: " << info.arena+info.hblkhd << " Bytes" << std::endl;
+    // This is the total size of memory occupied by chunks handed out by malloc and
+    // mmap.
+    std::cerr << "Allocated 2: " << info.uordblks+info.hblkhd << " Bytes" << std::endl;
+}
+
+static void output_commit(const std::string& str, size_t mark, bool no_from=false)
+{
+    std::cout << "commit refs/heads/master\n";
+    std::cout << "mark :" << mark << '\n';
+    if( ! no_from) {
+        size_t m_start = str.rfind('\n')+1;
+        std::cout << str.substr(0, m_start);
+        std::cout << "from :" << mark-1 << '\n';
+        std::cout << str.substr(m_start) << '\n';
+    }
+    else
+        std::cout << str << '\n';
+}
 
 int main(int argc, char** argv)
 {
@@ -260,6 +470,8 @@ int main(int argc, char** argv)
     if(rc)
         return rc;
 
+    boost::posix_time::ptime starttime(boost::posix_time::second_clock::local_time());
+
     std::cerr << "Step 1: Creating blobs." << std::endl;
 
     // Initialize the parser
@@ -269,24 +481,91 @@ int main(int argc, char** argv)
     XML_SetElementHandler(parser, startElement, endElement);
     XML_SetCharacterDataHandler(parser, characterHandler);
 
-    // Create the input stream
+    // Open the file with bzip-decompressor or stdin
+    std::istream* infile;
     std::ifstream file(filename, std::ios_base::in | std::ios_base::binary);
     boost::iostreams::filtering_streambuf<boost::iostreams::input> in;
-    in.push(boost::iostreams::bzip2_decompressor());
-    in.push(file);
-    std::istream ins(&in);
+    if( filename.empty() )
+        infile = &std::cin;
+    else {
+        // Create the input stream
+        in.push(boost::iostreams::bzip2_decompressor());
+        in.push(file);
+        infile = new std::istream(&in);
+    }
 
-    // Read and parse
-    while( ins ) {
-        void* parseBuffer(XML_GetBuffer(parser, BUFFER_SIZE));
-        ins.read((char*)parseBuffer, BUFFER_SIZE);
-        if (XML_ParseBuffer(parser, ins.gcount(), 0) == XML_STATUS_ERROR) {
-            std::cerr << XML_ErrorString(XML_GetErrorCode(parser)) << std::endl;
-            return 1;
+    // Open the temporary file
+    if( ! tempfilename.empty() ) {
+        tfile.exceptions( std::fstream::failbit | std::fstream::badbit );
+        //tfile.exceptions( std::ifstream::eofbit | std::fstream::failbit | std::fstream::badbit );
+        try {
+            tfile.open(tempfilename,
+                std::fstream::binary | std::fstream::in | std::fstream::out | std::fstream::trunc);
+        }
+        catch (std::exception& e) {
+            // e.what() offers only cryptic errors here
+            std::cerr << "ERROR: Can't open file '" << tempfilename << "'!" << std::endl;
+            return 2;
         }
     }
 
-    std::cerr << "Processed " << pagecount << " pages (" << revisioncount << " revisions)." << std::endl;
+    // Read, parse and output blobs.
+    while( *infile && revisions_read < max_revisions ) {
+        void* parseBuffer(XML_GetBuffer(parser, BUFFER_SIZE));
+        infile->read((char*)parseBuffer, BUFFER_SIZE);
+        if (XML_ParseBuffer(parser, infile->gcount(), 0) == XML_STATUS_ERROR) {
+            std::cerr << XML_ErrorString(XML_GetErrorCode(parser)) << std::endl;
+            return 1;
+        }
+        if(revisions_read >= max_revisions)
+            break; // This will create some more blobs, but we don't care.
+    }
+
+    // Output commits.
+
+    if( ! revisions_read ) {
+        std::cerr << "No revisions read!" << std::endl;
+        exit(0);
+    }
+
+    printMemInfo();
+
+    std::cerr << "Step 2: Writing " << std::min(revisions_read, max_revisions)
+        << " commits." << std::endl;
+
+    size_t mark(1);
+    if( ! tempfilename.empty() ) {
+        RevisionPositions::iterator i = revisionPositions.begin();
+        output_commit(readString(i->second), mark, true);
+        ++mark;
+        revisionPositions.erase(i++);
+        RevisionPositions::const_iterator end = revisionPositions.end();
+        for( ; i != end && mark <= max_revisions; ++mark ) {
+            output_commit(readString(i->second), mark);
+            revisionPositions.erase(i++);
+        }
+        tfile.close();
+        // TODO: unlink tfile
+    }
+    else {
+        Revisions::iterator i = revisions.begin();
+        output_commit(i->second, mark, true);
+        ++mark;
+        revisions.erase(i++);
+        Revisions::const_iterator end = revisions.end();
+        for( ; i != end && mark <= max_revisions; ++mark ) {
+            output_commit(i->second, mark);
+            revisions.erase(i++);
+        }
+    }
+
+    std::cerr << "Time needed: " << boost::posix_time::to_simple_string(
+        boost::posix_time::second_clock::local_time() - starttime) << std::endl;
+
+    printMemInfo();
+
+    std::cerr << "Processed " << std::min(revisions_read, max_revisions)
+        << " revisions." << std::endl;
 
     // Let the libc perform all the cleanup and just quit.
     return 0;

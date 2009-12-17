@@ -29,6 +29,23 @@ Build the release-version:
 cmake -DCMAKE_BUILD_TYPE=release
 make
 
+Afterwards you can keep your box busy with
+
+user@box $ mkdir -p /SeveralGBfree/dewiki.git/.git
+user@box $ GIT_DIR=/SeveralGBfree/dewiki.git/.git git init
+user@box $ 7z e -bd -so dewiki-20091028-pages-meta-history.xml.7z | ./wp2git -t /SeveralGBfree/mytempfile | GIT_DIR=/SeveralGBfree/dewiki.git/.gi
+user@box $ rm /SeveralGBfree/mytempfile
+user@box $ GIT_DIR=/SeveralGBfree/dewiki.git/.git git reset --hard HEAD
+
+Warning: Running wp2git on large files like dewiki will take very long,
+will need a lot of memory (4 GB aren't enough) and diskspace somewhat
+around 50 GB (I guess). I haven't tried it by myself upto now.
+
+
+A help is displayed with ./wp2git -h
+
+
+
 Build the debug-version:
 cmake -DCMAKE_BUILD_TYPE=debug
 make
