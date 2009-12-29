@@ -13,7 +13,7 @@ add_custom_target(version.h
     ${CMAKE_CURRENT_SOURCE_DIR}/git-version-gen.sh
         ${CMAKE_CURRENT_BINARY_DIR}/version.h
         ${CMAKE_CURRENT_SOURCE_DIR}/version
-        ${CMAKE_CURRENT_SOURCE_DIR}/.. )
+        ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Boost
 IF (${CMAKE_MAJOR_VERSION}.${CMAKE_MINOR_VERSION} GREATER 2.5)
