@@ -447,18 +447,26 @@ static void printMemInfo(void)
     std::cerr << "Allocated 2: " << info.uordblks+info.hblkhd << " Bytes" << std::endl;
 }
 
-static void output_commit(const std::string& str, size_t mark, bool no_from=false)
+static std::string output_commit(const std::string& str,
+    const std::string& from)
 {
     std::cout << "commit refs/heads/master\n";
-    std::cout << "mark :" << mark << '\n';
-    if( ! no_from) {
-        size_t m_start = str.rfind('\n')+1;
+    // Get the start of the line beginning with M 100644 :mark.
+    // Used to insert From and to get the mark.
+    size_t m_start = str.rfind('\n')+1;
+    size_t mark_start = str.find(':', m_start)+1;
+    size_t mark_end = str.find(' ', mark_start);
+    assert( mark_end != std::string::npos );
+    // This moves the mark from the blob to the commit.
+    std::cout << "mark :" << str.substr(mark_start, mark_end-mark_start) << '\n';
+    if( !from.empty() ) {
         std::cout << str.substr(0, m_start);
-        std::cout << "from :" << mark-1 << '\n';
+        std::cout << "from :" << from << '\n';
         std::cout << str.substr(m_start) << '\n';
     }
     else
         std::cout << str << '\n';
+    return str.substr(mark_start, mark_end-mark_start);
 }
 
 int main(int argc, char** argv)
@@ -533,15 +541,13 @@ int main(int argc, char** argv)
     std::cerr << "Step 2: Writing " << std::min(revisions_read, max_revisions)
         << " commits." << std::endl;
 
-    size_t mark(1);
     if( ! tempfilename.empty() ) {
         RevisionPositions::iterator i = revisionPositions.begin();
-        output_commit(readString(i->second), mark, true);
-        ++mark;
+        std::string from(output_commit(readString(i->second), ""));
         revisionPositions.erase(i++);
         RevisionPositions::const_iterator end = revisionPositions.end();
-        for( ; i != end && mark <= max_revisions; ++mark ) {
-            output_commit(readString(i->second), mark);
+        for( size_t count = 1 ; i != end && count < max_revisions; ++count ) {
+            from = output_commit(readString(i->second), from);
             revisionPositions.erase(i++);
         }
         tfile.close();
@@ -549,12 +555,11 @@ int main(int argc, char** argv)
     }
     else {
         Revisions::iterator i = revisions.begin();
-        output_commit(i->second, mark, true);
-        ++mark;
+        std::string from(output_commit(i->second, ""));
         revisions.erase(i++);
         Revisions::const_iterator end = revisions.end();
-        for( ; i != end && mark <= max_revisions; ++mark ) {
-            output_commit(i->second, mark);
+        for( size_t count = 1 ; i != end && count < max_revisions; ++count ) {
+            from = output_commit(i->second, from);
             revisions.erase(i++);
         }
     }
