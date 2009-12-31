@@ -1,0 +1,19 @@
+# Example for a blacklist of namespaces to ignore.
+#
+# Empty lines or lines with an # as first char are ignored.
+#
+# The names here are checked against pages having a colon
+# in their title.
+# E.g. if a line with 'Diskussion' is found in this file,
+# every page with a title starting with 'Diskussion:' is ignored, but
+# not pages with titles starting like 'Diskussion foo:'
+#
+# Be sure you don't leave spaces at the end of the line, they would be included.
+# E.g. a line with 'Diskussion ' would blacklist all pages with 'Diskussion :'.
+
+Benutzer
+Benutzer Diskussion
+Diskussion
+Portal Diskussion
+Wikipedia
+Wikipedia Diskussion

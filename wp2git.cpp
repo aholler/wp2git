@@ -53,6 +53,7 @@ static unsigned deepness(3);
 static bool wikitime(false);
 static size_t max_revisions(0);
 static std::string programname;
+static std::string blacklist;
 
 // The actual code starts here.
 
@@ -115,6 +116,11 @@ static RevisionPositions revisionPositions;
 
 static std::string actualValue;
 
+static std::set<std::string> ns_blacklist;
+static bool ignorePage(false); // Will be set to true if the title of page is found in the blacklist
+static unsigned long ignoredPages(0);
+static unsigned long ignoredRevisions(0);
+
 static void printHelp(const std::string& myName,
     const boost::program_options::options_description& desc)
 {
@@ -152,6 +158,8 @@ int config(int argc, char** argv)
     try {
         desc.add_options()
         ("help,h", "help message")
+        ("blacklist,b", boost::program_options::value<std::string>(&blacklist),
+            "Filename of a blacklist for namespaces (default none)")
         ("committer,c", boost::program_options::value<std::string>(&committer),
             std::string("git \"Committer\" used while doing the commits (default \"" + committer + "\")").c_str())
         ("deepness,d", boost::program_options::value<unsigned>(&deepness),
@@ -396,9 +404,13 @@ static void XMLCALL endElement(void *, const char *name)
             if( elementStack.size() == 4 ) // below revision
                 text.swap(actualValue);
             break;
-       case Element_revision:
-            if( elementStack.size() == 3 ) // below page
-               newRevision();
+        case Element_revision:
+            if( elementStack.size() == 3 ) { // below page
+                if( ! ignorePage )
+                    newRevision();
+                else
+                    ++ignoredRevisions;
+            }
             break;
         case Element_timestamp:
             if( elementStack.size() == 4 ) // below revision
@@ -408,15 +420,22 @@ static void XMLCALL endElement(void *, const char *name)
             if( elementStack.size() == 3 ) { // below page
                 title.swap(actualValue);
                 std::cerr << "Processing page " << title << std::endl;
+                ignorePage = false;
                 size_t colon = title.find(':');
                 if( colon != std::string::npos ) {
                     title_ns = title.substr(0, colon);
+                    if( ns_blacklist.find(title_ns) != ns_blacklist.end() ) {
+                        ignorePage = true;
+                        ++ignoredPages;
+                    }
                     // TODO: We should check if this is a namespace
                     // (which would require to read the namespaces).
                     title.erase(0, colon+1);
                 }
                 else
                     title_ns.clear();
+                if( ignorePage )
+                    std::cerr << "(blacklisted => ignored)" << std::endl;
             }
             break;
         case Element_username:
@@ -469,6 +488,26 @@ static std::string output_commit(const std::string& str,
     return str.substr(mark_start, mark_end-mark_start);
 }
 
+static void readBlacklist(void)
+{
+    std::ifstream blist;
+    try {
+        blist.open(blacklist);
+    }
+    catch (std::exception& e) {
+        // e.what() offers only cryptic errors here
+        std::cerr << "ERROR: Can't open file '" << blacklist << "'!" << std::endl;
+        return;
+    }
+    std::string s;
+    while(std::getline(blist, s)) {
+        if( s.empty() || s[0] == '#' )
+            continue;
+        ns_blacklist.insert(s);
+    }
+    blist.close();
+}
+
 int main(int argc, char** argv)
 {
     std::cerr << std::endl << "wp2git version " VERSION << std::endl;
@@ -477,6 +516,9 @@ int main(int argc, char** argv)
     int rc=config(argc, argv);
     if(rc)
         return rc;
+
+    if( ! blacklist.empty() )
+        readBlacklist();
 
     boost::posix_time::ptime starttime(boost::posix_time::second_clock::local_time());
 
@@ -571,7 +613,9 @@ int main(int argc, char** argv)
 
     std::cerr << "Processed " << std::min(revisions_read, max_revisions)
         << " revisions." << std::endl;
-
+    if( ignoredPages )
+        std::cerr << "Ignored " << ignoredPages << " blacklisted pages (" << ignoredRevisions
+            << " revisions)." << std::endl;
     // Let the libc perform all the cleanup and just quit.
     return 0;
 }
