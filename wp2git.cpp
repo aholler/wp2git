@@ -41,9 +41,9 @@ static std::string title_ns;
 static std::string username;
 static bool is_minor(false);
 static bool is_del(false); // TODO: is currently never set.
-static unsigned long id_contributor;
-static unsigned long id_page;
-static unsigned long id_revision;
+static std::string id_contributor;
+static std::string id_page;
+static std::string id_revision;
 
 // Options.
 static std::string filename;
@@ -220,7 +220,7 @@ static std::string buildCommitString(std::time_t date)
     std::string str("author ");
     if( ! username.empty() ) {
         str += username;
-        str += " <uid-" + boost::lexical_cast<std::string>(id_contributor);
+        str += " <uid-" + id_contributor;
     }
     else {
         str += ip;
@@ -234,8 +234,8 @@ static std::string buildCommitString(std::time_t date)
     // TODO: Fix timezone (using boost::local_time).
     str += boost::lexical_cast<std::string>(time(NULL))+ " +0100\n";
     std::string commit_comment("\n\nwp2git import of"
-        " page " + boost::lexical_cast<std::string>(id_page) +
-        + " rev " + boost::lexical_cast<std::string>(id_revision)
+        " page " + id_page
+        + " rev " + id_revision
         + (is_minor ? " (minor)" : "")
         + ".\n");
     str += "data " + boost::lexical_cast<std::string>(comment.size()+commit_comment.size()) + '\n';
@@ -259,7 +259,7 @@ static std::string buildCommitString(std::time_t date)
     tfilename += asciiize(title);
     tfilename += ".mediawiki";
 
-    str += "M 100644 :" + boost::lexical_cast<std::string>(id_revision)
+    str += "M 100644 :" + id_revision
         + ' ' + tfilename;
     return str;
 }
@@ -378,11 +378,11 @@ static void XMLCALL endElement(void *, const char *name)
             break;
         case Element_id:
             if( elementStack.size() == 4 ) // below revision
-                id_revision = boost::lexical_cast<unsigned long>(actualValue);
+                id_revision.swap(actualValue);
             else if( elementStack.size() == 5 ) // below contributor
-                id_contributor = boost::lexical_cast<unsigned long>(actualValue);
+                id_contributor.swap(actualValue);
             else if( elementStack.size() == 3 ) // below page
-                id_page = boost::lexical_cast<unsigned long>(actualValue);
+                id_page.swap(actualValue);
            break;
         case Element_ip:
             if( elementStack.size() == 5  || elementStack.size() == 6 ) // below contributor or below username
