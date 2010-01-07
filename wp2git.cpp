@@ -254,8 +254,12 @@ static std::string buildCommitString(std::time_t date)
         + " rev " + id_revision
         + (is_minor ? " (minor)" : "")
         + ".\n");
-    str += "data " + boost::lexical_cast<std::string>(comment.size()+commit_comment.size()) + '\n';
-    str += comment + commit_comment + '\n';
+    std::string commit_title(title_ns);
+    if( ! commit_title.empty() )
+        commit_title += ':';
+    commit_title += title + "\n\n";
+    str += "data " + boost::lexical_cast<std::string>(commit_title.size() + comment.size() + commit_comment.size()) + '\n';
+    str += commit_title + comment + commit_comment + '\n';
 
     // Build the filename
     unsigned flags(0);
