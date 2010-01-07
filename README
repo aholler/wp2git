@@ -33,8 +33,9 @@ Afterwards you can keep your box busy with
 
 user@box $ mkdir -p /SeveralGBfree/dewiki.git/.git
 user@box $ GIT_DIR=/SeveralGBfree/dewiki.git/.git git init
-user@box $ 7z e -bd -so dewiki-20091028-pages-meta-history.xml.7z | ./wp2git -t /SeveralGBfree/mytempfile | GIT_DIR=/SeveralGBfree/dewiki.git/.gi
+user@box $ 7z e -bd -so dewiki-20091223-pages-meta-history.xml.7z | ./wp2git -r 62133749 -t /SeveralGBfree/mytempfile | GIT_DIR=/SeveralGBfree/dewiki.git/.git
 user@box $ rm /SeveralGBfree/mytempfile
+user@box $ GIT_DIR=/SeveralGBfree/dewiki.git/.git git gc --aggressive
 user@box $ GIT_DIR=/SeveralGBfree/dewiki.git/.git git reset --hard HEAD
 
 Warning: Running wp2git on large files like dewiki will take very long,

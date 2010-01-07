@@ -44,6 +44,7 @@ static bool is_del(false); // TODO: is currently never set.
 static std::string id_contributor;
 static std::string id_page;
 static std::string id_revision;
+boost::posix_time::ptime time_start;
 
 // Options.
 static std::string filename;
@@ -54,6 +55,7 @@ static bool wikitime(false);
 static size_t max_revisions(0);
 static std::string programname;
 static std::string blacklist;
+static unsigned long revisions_total(0);
 
 // The actual code starts here.
 
@@ -134,8 +136,10 @@ static void printHelp(const std::string& myName,
     std::cerr << std::endl;
     std::cerr << myName
         << " barwiki-20091206-pages-articles.xml.bz2 | GIT_DIR=repo git fast-import" << std::endl;
+    std::cerr << "7z e -bd -so dewiki-20091223-pages-meta-history.xml.7z | "
+        << myName << " -t mytempfile -r 62133749 | GIT_DIR=repo git fast-import" << std::endl;
     std::cerr << "7z e -bd -so dewiki-20091028-pages-meta-history.xml.7z | "
-        << myName << " -t mytempfile | GIT_DIR=repo git fast-import" << std::endl;
+        << myName << " -m 100000 -b blacklist.example | bzip2 >stream_for_git-fast-import.bz2" << std::endl;
     std::cerr << myName
         << " -c \"Foo Bar <foo@bar.local>\" -d 10 -w barwiki-20091206-pages-articles.xml.bz2 | GIT_DIR=repo git fast-import" << std::endl;
     std::cerr << myName
@@ -166,6 +170,8 @@ int config(int argc, char** argv)
             "The deepness of the result directory structure (default 3)")
         ("max,m", boost::program_options::value<size_t>(&max_revisions),
             "Maximum number of revisions (not pages!) to import (default 0 = all)")
+        ("revisions,r", boost::program_options::value<unsigned long>(&revisions_total),
+            "The total number of revisions (used to calc ETA)")
         ("tempfile,t", boost::program_options::value<std::string>(&tempfilename),
             "Use this temporary file to minimize RAM-usage")
         ("wikitime,w", boost::program_options::bool_switch(&wikitime),
@@ -196,6 +202,8 @@ int config(int argc, char** argv)
         filename = vm["mediawiki-export-bz2"].as< std::vector<std::string> >()[0];
     if( ! max_revisions )
         max_revisions = (unsigned long)-1;
+    else
+        revisions_total = max_revisions;
     return 0;
 }
 
@@ -352,6 +360,22 @@ static void newRevision(void)
     ++revisions_read;
 }
 
+static void showStats(void)
+{
+    unsigned long rev_now(revisions_read + ignoredRevisions);
+    std::cerr << "Revisions read: " << rev_now;
+    if( revisions_total && rev_now ) {
+        std::cerr << '/' << revisions_total;
+        std::cerr << " (ETA "
+            << boost::posix_time::to_simple_string(
+                (boost::posix_time::second_clock::local_time() - time_start)
+                * (double)(revisions_total-rev_now)/rev_now )
+            << ')' << std::endl;
+    }
+    else
+        std::cerr << std::endl;
+}
+
 // Callbacks for expat
 
 static void XMLCALL startElement(void *, const char *name, const char **)
@@ -418,6 +442,7 @@ static void XMLCALL endElement(void *, const char *name)
             break;
         case Element_title:
             if( elementStack.size() == 3 ) { // below page
+                showStats();
                 title.swap(actualValue);
                 std::cerr << "Processing page " << title << std::endl;
                 ignorePage = false;
@@ -520,9 +545,10 @@ int main(int argc, char** argv)
     if( ! blacklist.empty() )
         readBlacklist();
 
-    boost::posix_time::ptime starttime(boost::posix_time::second_clock::local_time());
 
     std::cerr << "Step 1: Creating blobs." << std::endl;
+
+    time_start = boost::posix_time::second_clock::local_time();
 
     // Initialize the parser
     initMap();
@@ -607,7 +633,7 @@ int main(int argc, char** argv)
     }
 
     std::cerr << "Time needed: " << boost::posix_time::to_simple_string(
-        boost::posix_time::second_clock::local_time() - starttime) << std::endl;
+        boost::posix_time::second_clock::local_time() - time_start) << std::endl;
 
     printMemInfo();
 
