@@ -262,17 +262,13 @@ static std::string buildCommitString(std::time_t date)
     str += commit_title + comment + commit_comment + '\n';
 
     // Build the filename
-    unsigned flags(0);
-    if(is_minor)
-        ++flags;
-    if( username.empty() )
-        flags += 2;
-    if(is_del)
-        flags += 4;
-    std::string tfilename(boost::lexical_cast<std::string>(flags));
-    // TODO: import.py does something other here (e.g. 10-)
-    tfilename += "-" + title_ns + '/';
-    for( unsigned i = 0; i<deepness && i<title.size(); ++i ) {
+    std::string tfilename(title_ns);
+    unsigned i(0);
+    if( ! tfilename.empty() ) {
+        tfilename += '/';
+        ++i;
+    }
+    for( ; i<deepness && i<title.size(); ++i ) {
         tfilename += asciiize_char(title[i]);
         tfilename += '/';
     }
