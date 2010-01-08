@@ -644,6 +644,10 @@ int main(int argc, char** argv)
 
     printMemInfo();
 
+    boost::posix_time::ptime time_start_step2(boost::posix_time::second_clock::local_time());
+    std::cerr << "Time needed for step 1: " << boost::posix_time::to_simple_string(
+        time_start_step2 - time_start) << std::endl;
+
     std::cerr << "Step 2: Writing " << std::min(revisions_read, max_revisions)
         << " commits." << std::endl;
 
@@ -670,10 +674,15 @@ int main(int argc, char** argv)
         }
     }
 
-    std::cerr << "Time needed: " << boost::posix_time::to_simple_string(
-        boost::posix_time::second_clock::local_time() - time_start) << std::endl;
-
     printMemInfo();
+
+    boost::posix_time::ptime time_end_step2(boost::posix_time::second_clock::local_time());
+    std::cerr << "Time needed for step 2: " << boost::posix_time::to_simple_string(
+        time_end_step2 - time_start_step2) << std::endl;
+
+    std::cerr << "Time needed overall: " << boost::posix_time::to_simple_string(
+        time_end_step2 - time_start) << std::endl;
+
 
     std::cerr << "Processed " << std::min(revisions_read, max_revisions)
         << " revisions." << std::endl;
