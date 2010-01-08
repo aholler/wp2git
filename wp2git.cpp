@@ -1,4 +1,4 @@
-// (c) 2009 Alexander Holler
+// (c) 2009, 2010 Alexander Holler
 // See the file COPYING for copying permission.
 //
 // I'm believing in KISS (keep it stupid, simple).
@@ -536,7 +536,7 @@ static void readBlacklist(void)
 int main(int argc, char** argv)
 {
     std::cerr << std::endl << "wp2git version " VERSION << std::endl;
-    std::cerr << "(c) 2009 Alexander Holler" << std::endl << std::endl;
+    std::cerr << "(c) 2009, 2010 Alexander Holler" << std::endl << std::endl;
 
     int rc=config(argc, argv);
     if(rc)
