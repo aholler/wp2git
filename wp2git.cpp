@@ -249,7 +249,7 @@ static std::string buildCommitString(std::time_t date)
     str += "committer " + committer + ' ';
     // TODO: Fix timezone (using boost::local_time).
     str += boost::lexical_cast<std::string>(time(NULL))+ " +0100\n";
-    std::string commit_comment("\n\nwp2git import of"
+    std::string commit_comment("\n\nwp2git " VERSION " import of"
         " page " + id_page
         + " rev " + id_revision
         + (is_minor ? " (minor)" : "")
