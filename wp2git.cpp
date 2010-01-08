@@ -110,11 +110,53 @@ static void initMap(void)
 
 static std::stack<Element> elementStack;
 
-typedef std::multimap<std::time_t, std::string> Revisions;
-static Revisions revisions;
-
-typedef std::multimap<std::time_t, std::streampos> RevisionPositions;
+// We are sorting first by timestamp and if two revisions have the
+// same timestamp we are using the id.
+class ForSortingPos {
+    public:
+        ForSortingPos(std::time_t d, unsigned long i, std::streampos p)
+            : date(d)
+            , id(i)
+            , pos(p)
+            {}
+        const std::time_t date;
+        const unsigned long id;
+        const std::streampos pos;
+        bool operator==(const ForSortingPos& f) const {
+            return date == f.date && id == f.id;
+        }
+        bool operator<(const ForSortingPos& f) const {
+            if( date != f.date)
+                return date < f.date;
+            else
+                return id < f.id;
+        }
+};
+typedef std::set<ForSortingPos> RevisionPositions;
 static RevisionPositions revisionPositions;
+
+// The same without strings instead of the position
+class ForSortingString {
+    public:
+        ForSortingString(std::time_t d, unsigned long i, std::string s)
+            : date(d)
+            , id(i)
+            { str.swap(s); }
+        const std::time_t date;
+        const unsigned long id;
+        std::string str;
+        bool operator==(const ForSortingString& f) const {
+            return date == f.date && id == f.id;
+        }
+        bool operator<(const ForSortingString& f) const {
+            if( date != f.date)
+                return date < f.date;
+            else
+                return id < f.id;
+        }
+};
+typedef std::set<ForSortingString> Revisions;
+static Revisions revisions;
 
 static std::string actualValue;
 
@@ -349,14 +391,10 @@ static void newRevision(void)
 {
     output_blob();
     std::time_t date = time_t_from_timestamp();
-    if( ! tempfilename.empty() ) {
-        std::streampos pos = writeString(buildCommitString(date));
-        revisionPositions.insert(
-            std::pair<std::time_t, std::streampos>(date, pos));
-    }
+    if( ! tempfilename.empty() )
+        revisionPositions.insert(ForSortingPos(date, boost::lexical_cast<unsigned long>(id_revision), writeString(buildCommitString(date))));
     else
-        revisions.insert(
-            std::pair<std::time_t, std::string>(date, buildCommitString(date)));
+        revisions.insert(ForSortingString(date, boost::lexical_cast<unsigned long>(id_revision), buildCommitString(date)));
     ++revisions_read;
 }
 
@@ -611,11 +649,11 @@ int main(int argc, char** argv)
 
     if( ! tempfilename.empty() ) {
         RevisionPositions::iterator i = revisionPositions.begin();
-        std::string from(output_commit(readString(i->second), ""));
+        std::string from(output_commit(readString(i->pos), ""));
         revisionPositions.erase(i++);
         RevisionPositions::const_iterator end = revisionPositions.end();
         for( size_t count = 1 ; i != end && count < max_revisions; ++count ) {
-            from = output_commit(readString(i->second), from);
+            from = output_commit(readString(i->pos), from);
             revisionPositions.erase(i++);
         }
         tfile.close();
@@ -623,11 +661,11 @@ int main(int argc, char** argv)
     }
     else {
         Revisions::iterator i = revisions.begin();
-        std::string from(output_commit(i->second, ""));
+        std::string from(output_commit(i->str, ""));
         revisions.erase(i++);
         Revisions::const_iterator end = revisions.end();
         for( size_t count = 1 ; i != end && count < max_revisions; ++count ) {
-            from = output_commit(i->second, from);
+            from = output_commit(i->str, from);
             revisions.erase(i++);
         }
     }
